@@ -1,0 +1,14 @@
+# Large model files — exceed GitHub's 100 MB limit
+final_housing_model.pkl
+full_pipeline.pkl
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
