@@ -23,6 +23,110 @@ warnings.filterwarnings('ignore')
 # Set random seed for reproducibility
 np.random.seed(42)
 
+# --- HELPER CLASSES & FUNCTIONS ---
+
+class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
+    def __init__(self, add_bedrooms_per_room=True):
+        self.add_bedrooms_per_room = add_bedrooms_per_room
+        
+    def fit(self, X, y=None):
+        return self
+    
+    def transform(self, X):
+        rooms_per_household = X[:, 3] / X[:, 6]
+        population_per_household = X[:, 5] / X[:, 6]
+        
+        if self.add_bedrooms_per_room:
+            bedrooms_per_room = X[:, 4] / X[:, 3]
+            return np.c_[X, rooms_per_household, population_per_household, bedrooms_per_room]
+        else:
+            return np.c_[X, rooms_per_household, population_per_household]
+
+def indices_of_top_features(importances, k):
+    return np.sort(np.argsort(importances)[::-1][:k])
+
+class TopFeatureSelector(BaseEstimator, TransformerMixin):
+    def __init__(self, feature_importances, k):
+        self.feature_importances = feature_importances
+        self.k = k
+    def fit(self, X, y=None):
+        self.feature_indices_ = indices_of_top_features(self.feature_importances, self.k)
+        return self
+    def transform(self, X):
+        return X[:, self.feature_indices_]
+
+def plot_geography(housing, save_path="housing_geography.png"):
+    plt.figure(figsize=(12, 8))
+    housing.plot(kind="scatter", x="longitude", y="latitude", alpha=0.4,
+                 s=housing["population"]/100, label="population", figsize=(12,8),
+                 c="median_house_value", cmap=plt.get_cmap("jet"), colorbar=True,
+                 sharex=False)
+    plt.legend()
+    plt.title("California Housing Prices (Geographical Distribution)")
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.show()
+    print(f"Geographical plot saved as '{save_path}'")
+
+def plot_correlations(housing, save_path="correlation_heatmap.png"):
+    corr_matrix = housing.select_dtypes(include=[np.number]).corr()
+    print("\nCorrelation with median_house_value:")
+    print(corr_matrix["median_house_value"].sort_values(ascending=False))
+    
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', linewidths=0.5)
+    plt.title("Feature Correlations")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.show()
+    print(f"Correlation heatmap saved as '{save_path}'")
+
+def plot_feature_importances(importances, attributes, save_path="feature_importances.png"):
+    sorted_indices = np.argsort(importances)[::-1]
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(importances[:15])), importances[sorted_indices[:15]])
+    plt.title("Feature Importances (Top 15)")
+    plt.xlabel("Features")
+    plt.ylabel("Importance")
+    plt.xticks(range(len(importances[:15])), 
+               [attributes[i] for i in sorted_indices[:15]], rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.show()
+    print(f"Feature importances plot saved as '{save_path}'")
+
+def plot_residuals(y_true, y_pred, save_path_scatter="predictions_vs_actual.png", 
+                   save_path_residuals="residual_analysis.png"):
+    # Predictions vs Actual
+    plt.figure(figsize=(10, 6))
+    plt.scatter(y_true, y_pred, alpha=0.5)
+    plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
+    plt.xlabel("Actual Values ($)")
+    plt.ylabel("Predicted Values ($)")
+    plt.title("Predictions vs Actual Values (Test Set)")
+    plt.tight_layout()
+    plt.savefig(save_path_scatter, dpi=100, bbox_inches='tight')
+    plt.show()
+    
+    # Residual Analysis
+    residuals = y_true - y_pred
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.scatter(y_pred, residuals, alpha=0.5)
+    plt.xlabel("Predicted Values")
+    plt.ylabel("Residuals")
+    plt.title("Residuals vs Predicted")
+    plt.axhline(y=0, color='r', linestyle='--')
+    
+    plt.subplot(1, 2, 2)
+    plt.hist(residuals, bins=50, edgecolor='black')
+    plt.xlabel("Residuals")
+    plt.ylabel("Frequency")
+    plt.title("Distribution of Residuals")
+    plt.tight_layout()
+    plt.savefig(save_path_residuals, dpi=100, bbox_inches='tight')
+    plt.show()
+    print(f"Visualizations saved as '{save_path_scatter}' and '{save_path_residuals}'")
+
 # 1. DATA ACQUISITION & SETUP
 print("="*60)
 print("HOUSING PRICES PREDICTION - REGRESSION PROBLEM")
@@ -110,30 +214,10 @@ print("EXPLORATORY DATA ANALYSIS")
 print("="*60)
 
 # Visualize geographical data
-plt.figure(figsize=(12, 8))
-housing.plot(kind="scatter", x="longitude", y="latitude", alpha=0.4,
-             s=housing["population"]/100, label="population", figsize=(12,8),
-             c="median_house_value", cmap=plt.get_cmap("jet"), colorbar=True,
-             sharex=False)
-plt.legend()
-plt.title("California Housing Prices (Geographical Distribution)")
-plt.savefig("housing_geography.png", dpi=100, bbox_inches='tight')
-plt.show()
-print("Geographical plot saved as 'housing_geography.png'")
+plot_geography(housing)
 
-# Look for correlations (numeric columns only — pandas 2.x drops non-numeric columns from corr())
-corr_matrix = housing.select_dtypes(include=[np.number]).corr()
-print("\nCorrelation with median_house_value:")
-print(corr_matrix["median_house_value"].sort_values(ascending=False))
-
-# Visualize correlations with a heatmap
-plt.figure(figsize=(10, 8))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', linewidths=0.5)
-plt.title("Feature Correlations")
-plt.tight_layout()
-plt.savefig("correlation_heatmap.png", dpi=100, bbox_inches='tight')
-plt.show()
-print("Correlation heatmap saved as 'correlation_heatmap.png'")
+# Visualize correlations
+plot_correlations(housing)
 
 # 4. PREPARE THE DATA FOR MACHINE LEARNING
 print("\n" + "="*60)
@@ -151,38 +235,6 @@ cat_attribs = ["ocean_proximity"]
 print(f"\nNumerical attributes: {num_attribs}")
 print(f"Categorical attributes: {cat_attribs}")
 
-# Custom transformer to add combined attributes
-class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
-    def __init__(self, add_bedrooms_per_room=True):
-        self.add_bedrooms_per_room = add_bedrooms_per_room
-        
-    def fit(self, X, y=None):
-        return self
-    
-    def transform(self, X):
-        # Assuming X is a numpy array with columns in the original order
-        # rooms_ix, bedrooms_ix, population_ix, households_ix = 3, 4, 5, 6
-        rooms_per_household = X[:, 3] / X[:, 6]
-        population_per_household = X[:, 5] / X[:, 6]
-        
-        if self.add_bedrooms_per_room:
-            bedrooms_per_room = X[:, 4] / X[:, 3]
-            return np.c_[X, rooms_per_household, population_per_household, bedrooms_per_room]
-        else:
-            return np.c_[X, rooms_per_household, population_per_household]
-
-def indices_of_top_features(importances, k):
-    return np.sort(np.argsort(importances)[::-1][:k])
-
-class TopFeatureSelector(BaseEstimator, TransformerMixin):
-    def __init__(self, feature_importances, k):
-        self.feature_importances = feature_importances
-        self.k = k
-    def fit(self, X, y=None):
-        self.feature_indices_ = indices_of_top_features(self.feature_importances, self.k)
-        return self
-    def transform(self, X):
-        return X[:, self.feature_indices_]
 
 # Create pipelines
 # Numerical pipeline
@@ -202,176 +254,113 @@ full_pipeline = ColumnTransformer([
 housing_prepared = full_pipeline.fit_transform(housing)
 print(f"\nPrepared data shape: {housing_prepared.shape}")
 
-# 5. TRAIN AND EVALUATE MODELS
+# 5. CONSOLIDATED MODEL RESEARCH & TUNING
 print("\n" + "="*60)
-print("TRAINING AND EVALUATING MODELS")
+print("CONSOLIDATED MODEL RESEARCH & TUNING (SPEED OPTIMIZED)")
 print("="*60)
 
-# Dictionary to store model performances
-model_performances = {}
+# Create a master dictionary to track all CV results
+research_results = {}
 
-def train_and_evaluate(model, X, y, model_name, cv=10):
-    """
-    Fit a regression model, report train-set RMSE, run k-fold
-    cross-validation, and store the mean CV RMSE for comparison.
+# 5.1 Speed Optimization: Subsample the data for exploratory search
+# We'll use 20% of the data to find the best archetype and rough params
+exploration_sample_size = 0.2
+exploration_indices = np.random.choice(len(housing), int(len(housing) * exploration_sample_size), replace=False)
+housing_exploration = housing.iloc[exploration_indices]
+labels_exploration = housing_labels.iloc[exploration_indices]
 
-    Parameters
-    ----------
-    model       : sklearn estimator
-    X           : prepared feature matrix (numpy array)
-    y           : target Series / array
-    model_name  : str — label used in print output and results dict
-    cv          : int — number of CV folds (default 10)
+print(f"\nUsing {exploration_sample_size*100:.0f}% of training data for exploration ({len(housing_exploration)} samples)")
 
-    Returns
-    -------
-    fitted model
-    """
-    # --- Fit ---
-    model.fit(X, y)
+# Define numerical features for indexing
+feature_names = num_attribs + ['rooms_per_household', 'population_per_household', 'bedrooms_per_room']
 
-    # --- Training-set RMSE ---
-    train_preds = model.predict(X)
-    train_rmse  = np.sqrt(mean_squared_error(y, train_preds))
-    print(f"\n{model_name} RMSE on training set: ${train_rmse:,.2f}")
-
-    # --- Cross-validation ---
-    cv_scores      = -cross_val_score(model, X, y,
-                                      scoring="neg_mean_squared_error", cv=cv)
-    cv_rmse_scores = np.sqrt(cv_scores)
-    print(f"{model_name} CV Scores:")
-    print(f"  Scores : {cv_rmse_scores}")
-    print(f"  Mean   : {cv_rmse_scores.mean():.4f}")
-    print(f"  Std Dev: {cv_rmse_scores.std():.4f}")
-
-    # --- Store for later comparison ---
-    model_performances[model_name] = cv_rmse_scores.mean()
-
-    return model
-
-# Define all candidate models
-candidates = [
-    ("Linear Regression",  LinearRegression()),
-    ("Decision Tree",       DecisionTreeRegressor(random_state=42)),
-    ("Random Forest",       RandomForestRegressor(n_estimators=100, random_state=42)),
-    ("Gradient Boosting",   GradientBoostingRegressor(n_estimators=100,
-                                                       learning_rate=0.1,
-                                                       random_state=42)),
-    ("SVM Regressor",       SVR(kernel="linear")),
-]
-
-# Train and evaluate every model with a single unified call
-trained_models = {}
-for name, model in candidates:
-    print("\n" + "-"*40)
-    print(f"Training {name}...")
-    trained_models[name] = train_and_evaluate(
-        model, housing_prepared, housing_labels, name
-    )
-
-# Convenience references used later in fine-tuning
-forest_reg = trained_models["Random Forest"]
-
-# 6. FINE-TUNE THE BEST MODEL
-print("\n" + "="*60)
-print("FINE-TUNING THE BEST MODEL")
-print("="*60)
-
-# 6. HYPERPARAMETER TUNING AND EXPERIMENTATION
-print("\n" + "="*60)
-print("HYPERPARAMETER TUNING AND EXPERIMENTATION")
-print("="*60)
-
-# 6.1 Try SVM Regressor (SVR) with RandomizedSearchCV
-print("\nPerforming Randomized Search for SVR...")
-param_distribs = {
-        'kernel': ['linear', 'rbf'],
-        'C': reciprocal(20, 200000),
-        'gamma': expon(scale=1.0),
-    }
-
-svr_reg = SVR()
-rnd_search_svr = RandomizedSearchCV(svr_reg, param_distributions=param_distribs,
-                                    n_iter=50, cv=5, scoring='neg_mean_squared_error',
-                                    verbose=2, random_state=42, n_jobs=-1)
-rnd_search_svr.fit(housing_prepared, housing_labels)
-
-svr_rmse = np.sqrt(-rnd_search_svr.best_score_)
-print(f"\nBest SVR parameters found: {rnd_search_svr.best_params_}")
-print(f"Best SVR cross-validation score (RMSE): ${svr_rmse:,.2f}")
-
-# 6.2 Randomized Search for Random Forest (Replacing GridSearchCV)
-print("\nPerforming Randomized Search for Random Forest...")
-param_distribs = {
-        'n_estimators': randint(low=1, high=200),
-        'max_features': randint(low=1, high=8),
-    }
-
-forest_reg = RandomForestRegressor(random_state=42)
-rnd_search_forest = RandomizedSearchCV(forest_reg, param_distributions=param_distribs,
-                                        n_iter=10, cv=5, scoring='neg_mean_squared_error',
-                                        random_state=42, n_jobs=-1)
-rnd_search_forest.fit(housing_prepared, housing_labels)
-
-forest_rmse = np.sqrt(-rnd_search_forest.best_score_)
-print(f"\nBest Random Forest parameters found: {rnd_search_forest.best_params_}")
-print(f"Best Random Forest cross-validation score (RMSE): ${forest_rmse:,.2f}")
-
-# 7. CREATE A UNIFIED PIPELINE (PREPARATION + SELECTION + PREDICTION)
-print("\n" + "="*60)
-print("CREATING A UNIFIED PIPELINE")
-print("="*60)
-
-# Use Random Forest as the best model for the final pipeline
-final_model = rnd_search_forest.best_estimator_
-
-# Get feature names for importance sorting
-feature_importances = final_model.feature_importances_
-cat_encoder = full_pipeline.named_transformers_['cat']
-cat_one_hot_attribs = list(cat_encoder.categories_[0])
-attributes = num_attribs + ['rooms_per_household', 'population_per_household', 
-                            'bedrooms_per_room'] + cat_one_hot_attribs
-
-k = 5 # Number of top features to select
-full_pipeline_with_predictor = Pipeline([
+# 5.2 Define the full unified pipeline structure
+unified_pipeline = Pipeline([
     ("preparation", full_pipeline),
-    ("feature_selection", TopFeatureSelector(feature_importances, k)),
-    ("prediction", final_model)
+    ("feature_selection", TopFeatureSelector(feature_importances=None, k=5)),
+    ("prediction", RandomForestRegressor(random_state=42))
 ])
 
-# Train the unified pipeline
-full_pipeline_with_predictor.fit(housing, housing_labels)
-print("\nUnified pipeline (preparation + selection + prediction) trained successfully!")
+# We need baseline feature importances once.
+print("Calculating base feature importances for selection logic (on full set)...")
+forest_baseline = RandomForestRegressor(random_state=42)
+forest_baseline.fit(housing_prepared, housing_labels)
+base_importances = forest_baseline.feature_importances_
+unified_pipeline.named_steps["feature_selection"].feature_importances = base_importances
 
-# 8. AUTOMATICALLY EXPLORE PREPARATION OPTIONS
+best_score = float('inf')
+best_params = None
+best_archetype_name = None
+
+# Archetypes with faster search settings
+archetypes = [
+    {
+        "name": "Random Forest",
+        "model": RandomForestRegressor(random_state=42),
+        "params": {
+            "prediction__n_estimators": randint(low=50, high=150),
+            "prediction__max_features": randint(low=1, high=8),
+            "feature_selection__k": list(range(5, 12))
+        }
+    },
+    {
+        "name": "Gradient Boosting",
+        "model": GradientBoostingRegressor(random_state=42),
+        "params": {
+            "prediction__n_estimators": randint(low=50, high=150),
+            "prediction__learning_rate": [0.05, 0.1, 0.2],
+            "feature_selection__k": list(range(5, 12))
+        }
+    },
+    {
+        "name": "SVR",
+        "model": SVR(),
+        "params": {
+            "prediction__kernel": ["linear", "rbf"],
+            "prediction__C": reciprocal(20, 50000),
+            "prediction__gamma": expon(scale=1.0),
+            "feature_selection__k": list(range(5, 12))
+        }
+    }
+]
+
+for archetype in archetypes:
+    print(f"\n--- Exploring {archetype['name']} ---")
+    unified_pipeline.set_params(prediction=archetype["model"])
+    
+    # Speed Optimization: Fewer iterations (10) and fewer folds (3)
+    rnd_search = RandomizedSearchCV(unified_pipeline, param_distributions=archetype["params"],
+                                    n_iter=10, cv=3, scoring='neg_mean_squared_error',
+                                    random_state=42, n_jobs=-1, verbose=1)
+    rnd_search.fit(housing_exploration, labels_exploration)
+    
+    current_rmse = np.sqrt(-rnd_search.best_score_)
+    research_results[archetype["name"]] = current_rmse
+    print(f"Best Subsampled CV RMSE: ${current_rmse:,.2f}")
+    
+    if current_rmse < best_score:
+        best_score = current_rmse
+        best_params = rnd_search.best_params_
+        best_archetype_name = archetype["name"]
+        final_pipeline = rnd_search.best_estimator_
+
+print(f"\nWinner: {best_archetype_name}")
+print(f"Best search RMSE (on subset): ${best_score:,.2f}")
+
+# 5.4 FINAL TRAINING: Train the winning configuration on the FULL training set
+print(f"\nRefitting the winning {best_archetype_name} model on the FULL training set...")
+final_pipeline.fit(housing, housing_labels)
+print("Final training complete.")
+
+# 6. EVALUATE & VISUALIZE FINAL MODEL
 print("\n" + "="*60)
-print("EXPLORING PREPARATION OPTIONS WITH GRIDSEARCH")
-print("="*60)
-
-param_grid = [{
-    'preparation__num__imputer__strategy': ['mean', 'median', 'most_frequent'],
-    'feature_selection__k': list(range(1, len(feature_importances) + 1))
-}]
-
-grid_search_prep = GridSearchCV(full_pipeline_with_predictor, param_grid, cv=5,
-                                scoring='neg_mean_squared_error', verbose=2, n_jobs=-1)
-grid_search_prep.fit(housing, housing_labels)
-
-print(f"\nBest preparation options: {grid_search_prep.best_params_}")
-print(f"Best score with tuned preparation: {np.sqrt(-grid_search_prep.best_score_):,.2f}")
-
-# Update final model to the best one from prep search
-final_pipeline = grid_search_prep.best_estimator_
-
-# 9. EVALUATE ON TEST SET
-print("\n" + "="*60)
-print("EVALUATING FINAL MODEL ON TEST SET")
+print("EVALUATING FINAL OPTIMIZED MODEL ON TEST SET")
 print("="*60)
 
 X_test = strat_test_set.drop("median_house_value", axis=1)
 y_test = strat_test_set["median_house_value"].copy()
 
-# Use the unified pipeline for prediction (prepares data automatically)
+# End-to-end prediction
 final_predictions = final_pipeline.predict(X_test)
 
 # Calculate metrics
@@ -380,91 +369,45 @@ final_rmse = np.sqrt(final_mse)
 final_mae = mean_absolute_error(y_test, final_predictions)
 final_r2 = r2_score(y_test, final_predictions)
 
-print(f"\nFinal Model Performance on Test Set:")
-print(f"RMSE: ${final_rmse:,.2f}")
-print(f"MAE: ${final_mae:,.2f}")
-print(f"R² Score: {final_r2:.4f}")
+print(f"\nFinal Statistics:")
+print(f"  RMSE     : ${final_rmse:,.2f}")
+print(f"  MAE      : ${final_mae:,.2f}")
+print(f"  R² Score : {final_r2:.4f}")
 
-# Calculate confidence interval
-from scipy import stats
-confidence = 0.95
-squared_errors = (final_predictions - y_test) ** 2
-ci_lower = np.sqrt(np.mean(squared_errors) - stats.t.ppf((1 + confidence) / 2, len(squared_errors) - 1) * 
-                   np.std(squared_errors) / np.sqrt(len(squared_errors)))
-ci_upper = np.sqrt(np.mean(squared_errors) + stats.t.ppf((1 + confidence) / 2, len(squared_errors) - 1) * 
-                   np.std(squared_errors) / np.sqrt(len(squared_errors)))
-print(f"\n{confidence*100:.0f}% Confidence Interval for RMSE: [${ci_lower:,.2f}, ${ci_upper:,.2f}]")
+# Visualizations
+plot_residuals(y_test, final_predictions)
 
-# Visualize predictions vs actual values
-plt.figure(figsize=(10, 6))
-plt.scatter(y_test, final_predictions, alpha=0.5)
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
-plt.xlabel("Actual Values ($)")
-plt.ylabel("Predicted Values ($)")
-plt.title("Predictions vs Actual Values (Test Set)")
-plt.tight_layout()
-plt.savefig("predictions_vs_actual.png", dpi=100, bbox_inches='tight')
-plt.show()
-print("Predictions vs actual plot saved as 'predictions_vs_actual.png'")
+# Get feature names for importance plot (using forest logic if winner is forest-like)
+if hasattr(final_pipeline.named_steps['prediction'], 'feature_importances_'):
+    # We need attributes for the SELECTED features
+    cat_encoder = full_pipeline.named_transformers_['cat']
+    cat_one_hot_attribs = list(cat_encoder.categories_[0])
+    all_attr_names = feature_names + cat_one_hot_attribs
+    
+    selected_indices = final_pipeline.named_steps['feature_selection'].feature_indices_
+    selected_attr_names = [all_attr_names[i] for i in selected_indices]
+    
+    plot_feature_importances(final_pipeline.named_steps['prediction'].feature_importances_, 
+                             selected_attr_names)
 
-# Residual analysis
-residuals = y_test - final_predictions
-plt.figure(figsize=(12, 4))
-
-plt.subplot(1, 2, 1)
-plt.scatter(final_predictions, residuals, alpha=0.5)
-plt.xlabel("Predicted Values")
-plt.ylabel("Residuals")
-plt.title("Residuals vs Predicted")
-plt.axhline(y=0, color='r', linestyle='--')
-
-plt.subplot(1, 2, 2)
-plt.hist(residuals, bins=50, edgecolor='black')
-plt.xlabel("Residuals")
-plt.ylabel("Frequency")
-plt.title("Distribution of Residuals")
-
-plt.tight_layout()
-plt.savefig("residual_analysis.png", dpi=100, bbox_inches='tight')
-plt.show()
-print("Residual analysis plot saved as 'residual_analysis.png'")
-
-# 8. MODEL COMPARISON
+# 7. SAVE & WRAP UP
 print("\n" + "="*60)
-print("MODEL COMPARISON SUMMARY")
-print("="*60)
-
-print("\nCross-validation RMSE Scores:")
-for model, score in sorted(model_performances.items(), key=lambda x: x[1]):
-    print(f"{model:20s}: ${score:,.2f}")
-
-# 9. SAVE THE FINAL MODEL AND PIPELINE
-print("\n" + "="*60)
-print("SAVING THE FINAL MODEL AND PIPELINE")
+print("PROJECT PERSISTENCE AND CONCLUSION")
 print("="*60)
 
 import joblib
-
-# Save the unified final pipeline
 joblib.dump(final_pipeline, 'final_housing_pipeline_complete.pkl')
-print("\nFinal unified pipeline saved as 'final_housing_pipeline_complete.pkl'")
+print("\nOptimization complete. Unified pipeline saved as 'final_housing_pipeline_complete.pkl'")
 
-# 10. EXAMPLE PREDICTION
-print("\n" + "="*60)
-print("EXAMPLE PREDICTION")
-print("="*60)
-
-# Get a sample from the test set
+# Final sample test
 sample_data = X_test.iloc[:5]
 sample_labels = y_test.iloc[:5]
-sample_predictions = final_pipeline.predict(sample_data)
+preds = final_pipeline.predict(sample_data)
 
-print("\nSample Predictions vs Actual Values:")
-for i in range(5):
-    print(f"Sample {i+1}: Predicted = ${sample_predictions[i]:,.2f}, "
-          f"Actual = ${sample_labels.iloc[i]:,.2f}, "
-          f"Error = ${abs(sample_predictions[i] - sample_labels.iloc[i]):,.2f}")
+print("\nSample Results (Predictions vs Actual):")
+for p, a in zip(preds, sample_labels):
+    print(f"  Predicted: ${p:,.0f} | Actual: ${a:,.0f} | Error: ${abs(p-a):,.0f}")
 
 print("\n" + "="*60)
-print("PROJECT COMPLETED SUCCESSFULLY!")
+print("OPTIMIZATION COMPLETED SUCCESSFULLY!")
 print("="*60)

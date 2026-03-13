@@ -9,7 +9,7 @@ A complete end-to-end machine learning regression project that predicts Californ
 ```
 Housing Price Prediction/
 │
-├── housingprice.py            # Main script — full ML pipeline (445 lines)
+├── housingprice.py            # Main script — optimized ML pipeline (~420 lines)
 │
 ├── datasets/                  # Auto-created on first run
 │   ├── housing.tgz            # Downloaded compressed archive
@@ -32,168 +32,34 @@ Housing Price Prediction/
 
 ## 🔄 Step-by-Step Workflow
 
-The entire project lives in a single script, **`housingprice.py`**, organised into 10 clearly labelled sections.
+The project is structured into **7 key phases** for maximum efficiency and modularity.
 
 ### Step 1 — Data Acquisition & Setup
-
-| Function | Purpose |
-|---|---|
-| `fetch_housing_data()` | Downloads `housing.tgz` from GitHub into `datasets/`, then extracts it |
-| `load_housing_data()` | Reads `housing.csv` into a Pandas DataFrame |
-
-The raw dataset contains **20,640 California census block groups** with these columns:
-
-| Feature | Type | Description |
-|---|---|---|
-| `longitude` | float | Block group longitude |
-| `latitude` | float | Block group latitude |
-| `housing_median_age` | float | Median age of houses in block |
-| `total_rooms` | float | Total rooms in block |
-| `total_bedrooms` | float | Total bedrooms (has missing values) |
-| `population` | float | Block population |
-| `households` | float | Number of households |
-| `median_income` | float | Median household income (tens of thousands $) |
-| `ocean_proximity` | str | Categorical proximity to ocean |
-| `median_house_value` | float | **Target variable** — median house value ($) |
-
----
+Downloads and extracts the California housing dataset automatically.
 
 ### Step 2 — Stratified Train/Test Split
+Uses `StratifiedShuffleSplit` on income categories to ensure the test set (20%) is representative of the overall population's wealth distribution.
 
-To avoid sampling bias on income (the strongest predictor), `median_income` is first discretised into **5 income bands** and a **`StratifiedShuffleSplit`** is applied:
+### Step 3 — Exploratory Data Analysis (EDA)
+Generates geographical and correlation visualizations using modular helper functions.
 
-- **Train set**: 80% (≈ 16,512 samples)
-- **Test set**: 20% (≈ 4,128 samples)
+### Step 4 — Data Preparation
+Builds a preprocessing pipeline including:
+- **Numerical**: Median imputation, feature engineering (ratios), and standard scaling.
+- **Categorical**: One-hot encoding for `ocean_proximity`.
 
-The `income_cat` helper column is dropped after splitting, restoring the original feature set.
+### Step 5 — Consolidated Research & Tuning (Speed Optimized) 🚀
+This is the heart of the optimization. Instead of separate training steps, it uses a **Global Search Strategy**:
+- **Subsampling**: Uses only **20% of training data** during initial exploration to identify the best model archetype 5x faster.
+- **Unified Pipeline**: Chains preparation, top-feature selection, and the estimator into one object.
+- **Randomized Search**: Explores **Random Forest, Gradient Boosting, and SVR** configurations simultaneously with reduced CV folds (3) for rapid iteration.
+- **Final Fit**: Re-trains the single winning configuration on the **full training set** for maximum accuracy.
 
----
+### Step 6 — Final Evaluation & Visualization
+Applies the winner to the held-out test set and generates performance plots (Residuals, Feature Importances).
 
-### Step 3 — Exploratory Data Analysis
-
-Two key visualisations are generated and saved automatically:
-
-**Geographical Distribution (`housing_geography.png`)**  
-Each point is a census block: dot *size* encodes population, dot *colour* encodes price (blue = cheap → red = expensive). Coastal regions and the Bay Area show the highest values.
-
-![California Housing Prices — Geographical Distribution](housing_geography.png)
-
-**Correlation Heatmap (`correlation_heatmap.png`)**  
-A Seaborn heatmap of the full Pearson correlation matrix. `median_income` (+0.69) is by far the strongest linear predictor of `median_house_value`.
-
-![Feature Correlations Heatmap](correlation_heatmap.png)
-
----
-
-### Step 4 — Data Preparation & Feature Engineering
-
-#### Custom Transformer: `CombinedAttributesAdder`
-Derives three ratio features that carry more signal than raw counts:
-
-| Engineered Feature | Formula |
-|---|---|
-| `rooms_per_household` | `total_rooms / households` |
-| `population_per_household` | `population / households` |
-| `bedrooms_per_room` | `total_bedrooms / total_rooms` |
-
-#### Preprocessing Pipeline
-
-```
-Numerical columns ──► SimpleImputer(median) ──► CombinedAttributesAdder ──► StandardScaler
-                                                                                            ├──► ColumnTransformer → prepared array
-Categorical column ──► OneHotEncoder(ocean_proximity) ──────────────────────────────────────┘
-```
-
-The final prepared array has **14 features** (9 original + 3 engineered + 5 one-hot encoded minus 1 categorical origin).
-
----
-
-### Step 5 — Model Training & Cross-Validation
-
-Four regression models are trained and evaluated via **10-fold cross-validation** (scored by RMSE):
-
-| Model | CV RMSE (approx.) | Notes |
-|---|---|---|
-| **Linear Regression** | ~$68,000 | Baseline, underfit |
-| **Decision Tree** | ~$70,000 | Overfits on training; high CV variance |
-| **Random Forest** | ~$50,000 | Best ensemble candidate |
-| **Gradient Boosting** | ~$51,000 | Competitive with Random Forest |
-| **SVM Regressor** | ~$111,000 | Baseline SVR with linear kernel |
-
-A `train_and_evaluate()` helper prints CV mean and standard deviation for each model.
-
----
-
-### Step 6 — Hyperparameter Tuning & Experimentation
-
-This section explores advanced tuning techniques to find the best possible model.
-
-**6.1 SVM Regressor (SVR) Tuning**  
-Uses `RandomizedSearchCV` to explore `linear` vs `rbf` kernels and a wide range of `C` and `gamma` hyperparameters (using `reciprocal` and `expon` distributions).
-
-**6.2 Randomized Search for Random Forest**  
-Replaces standard Grid Search with `RandomizedSearchCV` for faster exploration of `n_estimators` and `max_features`.
-
----
-
-### Step 7 — Advanced Pipeline Features
-
-#### `TopFeatureSelector` Transformer
-A custom transformer that takes the feature importances from the best model and selects only the top `k` most significant attributes.
-
-#### Unified Pipeline
-A single `Pipeline` object is created that chains:
-1. **Preparation**: `full_pipeline` (Imputer, Scaler, Encoder)
-2. **Selection**: `TopFeatureSelector`
-3. **Prediction**: The best-tuned `RandomForestRegressor`
-
-#### Automated Preparation Options
-A final `GridSearchCV` is run on the **entire unified pipeline** to simultaneously tune:
-- `imputer__strategy` ('mean', 'median', 'most_frequent')
-- `feature_selection__k` (number of top features to keep)
-
-This ensures the preprocessing steps are optimal for the specific model and feature set.
-
----
-
-### Step 8 — Final Evaluation on the Held-Out Test Set
-
-The tuned model is applied to the **unseen test set** (never touched during training/tuning):
-
-| Metric | Value |
-|---|---|
-| **RMSE** | ~$47,000–$49,000 |
-| **MAE** | ~$31,000–$33,000 |
-| **R² Score** | ~0.81–0.82 |
-| **95% CI for RMSE** | Computed via `scipy.stats.t` |
-
-**Predictions vs Actual (`predictions_vs_actual.png`):**
-
-![Predictions vs Actual Values](predictions_vs_actual.png)
-
-Points hug the red dashed perfect-prediction line well, with some under-prediction at the $500K cap (data truncation artefact).
-
-**Residual Analysis (`residual_analysis.png`):**
-
-![Residual Analysis](residual_analysis.png)
-
-The left panel (Residuals vs Predicted) shows a slight heteroscedasticity at higher values. The right panel shows the residual distribution is approximately centred at zero with a slight right skew.
-
----
-
-### Step 9 — Model Comparison Summary
-
-A sorted table of cross-validation RMSE is printed to the console, making it easy to compare all candidates.
-
----
-
-### Step 10 — Saving the Unified Pipeline
-
-```python
-joblib.dump(final_pipeline, 'final_housing_pipeline_complete.pkl')
-```
-
-The unified pipeline is saved for deployment. It contains all preparation, feature selection, and the final trained model.
+### Step 7 — Save & Wrap Up
+Serializes the entire unified pipeline into `final_housing_pipeline_complete.pkl` for one-line deployment.
 
 ---
 
@@ -253,10 +119,10 @@ predictions = full_pipeline.predict(X_new)
 | Median imputation for `total_bedrooms` | Robust to outliers; ~200 missing values in the dataset |
 | Engineered ratio features | Raw counts (rooms, bedrooms) correlate with each other; ratios per household carry more information |
 | `StandardScaler` on numerical features | Required for Linear/Ridge regression; doesn't hurt tree models |
-| `RandomizedSearchCV` | Faster and more efficient hyperparameter exploration than Grid Search |
 | `TopFeatureSelector` | Automatically prunes less relevant features to reduce model complexity |
-| Unified Pipeline | Encapsulates preparation and prediction for easier maintenance and deployment |
-| Meta-GridSearch | Automatically tunes preparation parameters (e.g. imputer strategy) for the specific model |
+| Data Subsampling | Uses a 20% subset for exploration to identify best models 5x faster |
+| Consolidated Search | Merges model tuning and prep exploration into a single global phase |
+| Unified Pipeline | Encapsulates preparation and prediction for one-click deployment |
 | `joblib` for model persistence | More efficient than `pickle` for large NumPy arrays inside scikit-learn models |
 
 ---
