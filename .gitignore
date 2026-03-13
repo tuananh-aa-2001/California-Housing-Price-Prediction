@@ -1,5 +1,6 @@
 # Large model files — exceed GitHub's 100 MB limit
 final_housing_model.pkl
+final_housing_pipeline_complete.pkl
 full_pipeline.pkl
 # Python cache
 __pycache__/

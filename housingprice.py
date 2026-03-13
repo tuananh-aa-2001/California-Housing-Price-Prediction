@@ -14,8 +14,9 @@ from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVR
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.stats import randint, uniform
+from scipy.stats import randint, uniform, reciprocal, expon
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -170,6 +171,19 @@ class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
         else:
             return np.c_[X, rooms_per_household, population_per_household]
 
+def indices_of_top_features(importances, k):
+    return np.sort(np.argsort(importances)[::-1][:k])
+
+class TopFeatureSelector(BaseEstimator, TransformerMixin):
+    def __init__(self, feature_importances, k):
+        self.feature_importances = feature_importances
+        self.k = k
+    def fit(self, X, y=None):
+        self.feature_indices_ = indices_of_top_features(self.feature_importances, self.k)
+        return self
+    def transform(self, X):
+        return X[:, self.feature_indices_]
+
 # Create pipelines
 # Numerical pipeline
 num_pipeline = Pipeline([
@@ -243,6 +257,7 @@ candidates = [
     ("Gradient Boosting",   GradientBoostingRegressor(n_estimators=100,
                                                        learning_rate=0.1,
                                                        random_state=42)),
+    ("SVM Regressor",       SVR(kernel="linear")),
 ]
 
 # Train and evaluate every model with a single unified call
@@ -262,67 +277,102 @@ print("\n" + "="*60)
 print("FINE-TUNING THE BEST MODEL")
 print("="*60)
 
-# Based on the performances, let's fine-tune Random Forest (usually performs well)
-print("\nPerforming Grid Search for Random Forest...")
+# 6. HYPERPARAMETER TUNING AND EXPERIMENTATION
+print("\n" + "="*60)
+print("HYPERPARAMETER TUNING AND EXPERIMENTATION")
+print("="*60)
 
-# 6.1 Grid Search
-param_grid = [
-    {'n_estimators': [50, 100, 200], 'max_features': [4, 6, 8]},
-    {'bootstrap': [False], 'n_estimators': [50, 100], 'max_features': [4, 6]},
-]
+# 6.1 Try SVM Regressor (SVR) with RandomizedSearchCV
+print("\nPerforming Randomized Search for SVR...")
+param_distribs = {
+        'kernel': ['linear', 'rbf'],
+        'C': reciprocal(20, 200000),
+        'gamma': expon(scale=1.0),
+    }
+
+svr_reg = SVR()
+rnd_search_svr = RandomizedSearchCV(svr_reg, param_distributions=param_distribs,
+                                    n_iter=50, cv=5, scoring='neg_mean_squared_error',
+                                    verbose=2, random_state=42, n_jobs=-1)
+rnd_search_svr.fit(housing_prepared, housing_labels)
+
+svr_rmse = np.sqrt(-rnd_search_svr.best_score_)
+print(f"\nBest SVR parameters found: {rnd_search_svr.best_params_}")
+print(f"Best SVR cross-validation score (RMSE): ${svr_rmse:,.2f}")
+
+# 6.2 Randomized Search for Random Forest (Replacing GridSearchCV)
+print("\nPerforming Randomized Search for Random Forest...")
+param_distribs = {
+        'n_estimators': randint(low=1, high=200),
+        'max_features': randint(low=1, high=8),
+    }
 
 forest_reg = RandomForestRegressor(random_state=42)
-grid_search = GridSearchCV(forest_reg, param_grid, cv=5,
-                           scoring='neg_mean_squared_error',
-                           return_train_score=True, n_jobs=-1)
-grid_search.fit(housing_prepared, housing_labels)
+rnd_search_forest = RandomizedSearchCV(forest_reg, param_distributions=param_distribs,
+                                        n_iter=10, cv=5, scoring='neg_mean_squared_error',
+                                        random_state=42, n_jobs=-1)
+rnd_search_forest.fit(housing_prepared, housing_labels)
 
-print(f"\nBest parameters found: {grid_search.best_params_}")
-print(f"Best cross-validation score: {np.sqrt(-grid_search.best_score_):,.2f}")
+forest_rmse = np.sqrt(-rnd_search_forest.best_score_)
+print(f"\nBest Random Forest parameters found: {rnd_search_forest.best_params_}")
+print(f"Best Random Forest cross-validation score (RMSE): ${forest_rmse:,.2f}")
 
-# 6.2 Analyze feature importance
-feature_importances = grid_search.best_estimator_.feature_importances_
+# 7. CREATE A UNIFIED PIPELINE (PREPARATION + SELECTION + PREDICTION)
+print("\n" + "="*60)
+print("CREATING A UNIFIED PIPELINE")
+print("="*60)
 
-# Get feature names
+# Use Random Forest as the best model for the final pipeline
+final_model = rnd_search_forest.best_estimator_
+
+# Get feature names for importance sorting
+feature_importances = final_model.feature_importances_
 cat_encoder = full_pipeline.named_transformers_['cat']
 cat_one_hot_attribs = list(cat_encoder.categories_[0])
 attributes = num_attribs + ['rooms_per_household', 'population_per_household', 
                             'bedrooms_per_room'] + cat_one_hot_attribs
 
-# Sort feature importances
-sorted_indices = np.argsort(feature_importances)[::-1]
-print("\nTop 10 Most Important Features:")
-for i in range(10):
-    print(f"{i+1}. {attributes[sorted_indices[i]]}: {feature_importances[sorted_indices[i]]:.4f}")
+k = 5 # Number of top features to select
+full_pipeline_with_predictor = Pipeline([
+    ("preparation", full_pipeline),
+    ("feature_selection", TopFeatureSelector(feature_importances, k)),
+    ("prediction", final_model)
+])
 
-# Visualize feature importances
-plt.figure(figsize=(12, 6))
-plt.bar(range(len(feature_importances[:15])), feature_importances[sorted_indices[:15]])
-plt.title("Feature Importances (Top 15)")
-plt.xlabel("Features")
-plt.ylabel("Importance")
-plt.xticks(range(len(feature_importances[:15])), 
-           [attributes[i] for i in sorted_indices[:15]], rotation=45, ha='right')
-plt.tight_layout()
-plt.savefig("feature_importances.png", dpi=100, bbox_inches='tight')
-plt.show()
-print("Feature importances plot saved as 'feature_importances.png'")
+# Train the unified pipeline
+full_pipeline_with_predictor.fit(housing, housing_labels)
+print("\nUnified pipeline (preparation + selection + prediction) trained successfully!")
 
-# 7. EVALUATE ON TEST SET
+# 8. AUTOMATICALLY EXPLORE PREPARATION OPTIONS
+print("\n" + "="*60)
+print("EXPLORING PREPARATION OPTIONS WITH GRIDSEARCH")
+print("="*60)
+
+param_grid = [{
+    'preparation__num__imputer__strategy': ['mean', 'median', 'most_frequent'],
+    'feature_selection__k': list(range(1, len(feature_importances) + 1))
+}]
+
+grid_search_prep = GridSearchCV(full_pipeline_with_predictor, param_grid, cv=5,
+                                scoring='neg_mean_squared_error', verbose=2, n_jobs=-1)
+grid_search_prep.fit(housing, housing_labels)
+
+print(f"\nBest preparation options: {grid_search_prep.best_params_}")
+print(f"Best score with tuned preparation: {np.sqrt(-grid_search_prep.best_score_):,.2f}")
+
+# Update final model to the best one from prep search
+final_pipeline = grid_search_prep.best_estimator_
+
+# 9. EVALUATE ON TEST SET
 print("\n" + "="*60)
 print("EVALUATING FINAL MODEL ON TEST SET")
 print("="*60)
 
-# Prepare the test data
-final_model = grid_search.best_estimator_
-
 X_test = strat_test_set.drop("median_house_value", axis=1)
 y_test = strat_test_set["median_house_value"].copy()
 
-X_test_prepared = full_pipeline.transform(X_test)
-
-# Make predictions
-final_predictions = final_model.predict(X_test_prepared)
+# Use the unified pipeline for prediction (prepares data automatically)
+final_predictions = final_pipeline.predict(X_test)
 
 # Calculate metrics
 final_mse = mean_squared_error(y_test, final_predictions)
@@ -395,11 +445,9 @@ print("="*60)
 
 import joblib
 
-# Save the model and pipeline
-joblib.dump(final_model, 'final_housing_model.pkl')
-joblib.dump(full_pipeline, 'full_pipeline.pkl')
-print("\nModel saved as 'final_housing_model.pkl'")
-print("Pipeline saved as 'full_pipeline.pkl'")
+# Save the unified final pipeline
+joblib.dump(final_pipeline, 'final_housing_pipeline_complete.pkl')
+print("\nFinal unified pipeline saved as 'final_housing_pipeline_complete.pkl'")
 
 # 10. EXAMPLE PREDICTION
 print("\n" + "="*60)
@@ -409,8 +457,7 @@ print("="*60)
 # Get a sample from the test set
 sample_data = X_test.iloc[:5]
 sample_labels = y_test.iloc[:5]
-sample_prepared = full_pipeline.transform(sample_data)
-sample_predictions = final_model.predict(sample_prepared)
+sample_predictions = final_pipeline.predict(sample_data)
 
 print("\nSample Predictions vs Actual Values:")
 for i in range(5):

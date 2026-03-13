@@ -17,8 +17,7 @@ Housing Price Prediction/
 │   └── housing/
 │       └── housing.csv        # Primary dataset (20,640 rows × 10 cols)
 │
-├── final_housing_model.pkl    # Serialised best RandomForest model (~228 MB)
-├── full_pipeline.pkl          # Serialised preprocessing pipeline (~4 KB)
+├── final_housing_pipeline_complete.pkl # Serialised unified pipeline (prep + select + predict)
 │
 ├── housing_geography.png      # EDA: Geo scatter plot of house values
 ├── correlation_heatmap.png    # EDA: Pearson correlation matrix heatmap
@@ -119,33 +118,45 @@ Four regression models are trained and evaluated via **10-fold cross-validation*
 | **Decision Tree** | ~$70,000 | Overfits on training; high CV variance |
 | **Random Forest** | ~$50,000 | Best ensemble candidate |
 | **Gradient Boosting** | ~$51,000 | Competitive with Random Forest |
+| **SVM Regressor** | ~$111,000 | Baseline SVR with linear kernel |
 
-A `display_scores()` helper prints CV mean and standard deviation for each model.
-
----
-
-### Step 6 — Hyperparameter Fine-Tuning
-
-**Grid Search** (`GridSearchCV`, 5-fold CV, `n_jobs=-1`):
-
-```python
-param_grid = [
-    {'n_estimators': [50, 100, 200], 'max_features': [4, 6, 8]},
-    {'bootstrap': [False], 'n_estimators': [50, 100], 'max_features': [4, 6]},
-]
-```
-
-The best `RandomForestRegressor` configuration is selected automatically, then its **feature importances** are inspected and visualised.
-
-**Feature Importances (`feature_importances.png`) — Top 15:**
-
-![Feature Importances (Top 15)](feature_importances.png)
-
-`median_income` dominates at ~0.32, followed by the engineered `population_per_household` (~0.15) and `bedrooms_per_room` (~0.10), confirming the value of feature engineering.
+A `train_and_evaluate()` helper prints CV mean and standard deviation for each model.
 
 ---
 
-### Step 7 — Final Evaluation on the Held-Out Test Set
+### Step 6 — Hyperparameter Tuning & Experimentation
+
+This section explores advanced tuning techniques to find the best possible model.
+
+**6.1 SVM Regressor (SVR) Tuning**  
+Uses `RandomizedSearchCV` to explore `linear` vs `rbf` kernels and a wide range of `C` and `gamma` hyperparameters (using `reciprocal` and `expon` distributions).
+
+**6.2 Randomized Search for Random Forest**  
+Replaces standard Grid Search with `RandomizedSearchCV` for faster exploration of `n_estimators` and `max_features`.
+
+---
+
+### Step 7 — Advanced Pipeline Features
+
+#### `TopFeatureSelector` Transformer
+A custom transformer that takes the feature importances from the best model and selects only the top `k` most significant attributes.
+
+#### Unified Pipeline
+A single `Pipeline` object is created that chains:
+1. **Preparation**: `full_pipeline` (Imputer, Scaler, Encoder)
+2. **Selection**: `TopFeatureSelector`
+3. **Prediction**: The best-tuned `RandomForestRegressor`
+
+#### Automated Preparation Options
+A final `GridSearchCV` is run on the **entire unified pipeline** to simultaneously tune:
+- `imputer__strategy` ('mean', 'median', 'most_frequent')
+- `feature_selection__k` (number of top features to keep)
+
+This ensures the preprocessing steps are optimal for the specific model and feature set.
+
+---
+
+### Step 8 — Final Evaluation on the Held-Out Test Set
 
 The tuned model is applied to the **unseen test set** (never touched during training/tuning):
 
@@ -170,30 +181,28 @@ The left panel (Residuals vs Predicted) shows a slight heteroscedasticity at hig
 
 ---
 
-### Step 8 — Model Comparison Summary
+### Step 9 — Model Comparison Summary
 
-A sorted table of cross-validation RMSE is printed to the console, making it easy to compare all four models side-by-side.
+A sorted table of cross-validation RMSE is printed to the console, making it easy to compare all candidates.
 
 ---
 
-### Step 9 — Saving the Model & Pipeline
+### Step 10 — Saving the Unified Pipeline
 
 ```python
-joblib.dump(final_model, 'final_housing_model.pkl')   # ~228 MB
-joblib.dump(full_pipeline, 'full_pipeline.pkl')        # ~4 KB
+joblib.dump(final_pipeline, 'final_housing_pipeline_complete.pkl')
 ```
 
-Both artefacts are saved to the project root using **`joblib`** for efficient binary serialisation.
+The unified pipeline is saved for deployment. It contains all preparation, feature selection, and the final trained model.
 
 ---
 
-### Step 10 — Example Prediction
+### Step 11 — Example Prediction
 
-Five samples are drawn from the test set and run through the saved pipeline to demonstrate end-to-end inference:
+Five samples are drawn from the test set and run through the **unified pipeline** in one step:
 
 ```python
-sample_prepared = full_pipeline.transform(sample_data)
-sample_predictions = final_model.predict(sample_prepared)
+sample_predictions = final_pipeline.predict(sample_data)
 ```
 
 Output shows predicted price, actual price, and the absolute error for each sample.
@@ -217,23 +226,21 @@ python housingprice.py
 ```
 
 The script will:
-1. Download the dataset automatically (requires internet access on first run)
-2. Train all models (Grid Search may take several minutes)
-3. Save `final_housing_model.pkl` and `full_pipeline.pkl`
-4. Save the five PNG visualisation files
+1. Download the dataset automatically.
+2. Train all models (Randomised and Grid Search may take several minutes).
+3. Save the unified `final_housing_pipeline_complete.pkl`.
+4. Save the five PNG visualisation files.
 
 ### Load the saved model for inference
 
 ```python
 import joblib
-import pandas as pd
 
-pipeline = joblib.load('full_pipeline.pkl')
-model    = joblib.load('final_housing_model.pkl')
+# Load the single unified pipeline file
+full_pipeline = joblib.load('final_housing_pipeline_complete.pkl')
 
-# Pass a DataFrame with the original 9 feature columns
-X_new_prepared = pipeline.transform(X_new)
-predictions = model.predict(X_new_prepared)
+# Predict directly on raw data matching the original feature set
+predictions = full_pipeline.predict(X_new)
 ```
 
 ---
@@ -246,7 +253,10 @@ predictions = model.predict(X_new_prepared)
 | Median imputation for `total_bedrooms` | Robust to outliers; ~200 missing values in the dataset |
 | Engineered ratio features | Raw counts (rooms, bedrooms) correlate with each other; ratios per household carry more information |
 | `StandardScaler` on numerical features | Required for Linear/Ridge regression; doesn't hurt tree models |
-| `GridSearchCV` over Random Forest | Random Forest usually outperforms single trees while remaining interpretable via feature importances |
+| `RandomizedSearchCV` | Faster and more efficient hyperparameter exploration than Grid Search |
+| `TopFeatureSelector` | Automatically prunes less relevant features to reduce model complexity |
+| Unified Pipeline | Encapsulates preparation and prediction for easier maintenance and deployment |
+| Meta-GridSearch | Automatically tunes preparation parameters (e.g. imputer strategy) for the specific model |
 | `joblib` for model persistence | More efficient than `pickle` for large NumPy arrays inside scikit-learn models |
 
 ---
