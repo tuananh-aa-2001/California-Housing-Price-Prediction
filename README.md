@@ -35,7 +35,7 @@ Housing Price Prediction/
 
 The entire project lives in a single script, **`housingprice.py`**, organised into 10 clearly labelled sections.
 
-### Step 1 — Data Acquisition & Setup (`lines 30–68`)
+### Step 1 — Data Acquisition & Setup
 
 | Function | Purpose |
 |---|---|
@@ -59,7 +59,7 @@ The raw dataset contains **20,640 California census block groups** with these co
 
 ---
 
-### Step 2 — Stratified Train/Test Split (`lines 70–104`)
+### Step 2 — Stratified Train/Test Split
 
 To avoid sampling bias on income (the strongest predictor), `median_income` is first discretised into **5 income bands** and a **`StratifiedShuffleSplit`** is applied:
 
@@ -70,7 +70,7 @@ The `income_cat` helper column is dropped after splitting, restoring the origina
 
 ---
 
-### Step 3 — Exploratory Data Analysis (`lines 106–135`)
+### Step 3 — Exploratory Data Analysis
 
 Two key visualisations are generated and saved automatically:
 
@@ -86,7 +86,7 @@ A Seaborn heatmap of the full Pearson correlation matrix. `median_income` (+0.69
 
 ---
 
-### Step 4 — Data Preparation & Feature Engineering (`lines 137–189`)
+### Step 4 — Data Preparation & Feature Engineering
 
 #### Custom Transformer: `CombinedAttributesAdder`
 Derives three ratio features that carry more signal than raw counts:
@@ -109,7 +109,7 @@ The final prepared array has **14 features** (9 original + 3 engineered + 5 one-
 
 ---
 
-### Step 5 — Model Training & Cross-Validation (`lines 191–280`)
+### Step 5 — Model Training & Cross-Validation
 
 Four regression models are trained and evaluated via **10-fold cross-validation** (scored by RMSE):
 
@@ -124,7 +124,7 @@ A `display_scores()` helper prints CV mean and standard deviation for each model
 
 ---
 
-### Step 6 — Hyperparameter Fine-Tuning (`lines 282–331`)
+### Step 6 — Hyperparameter Fine-Tuning
 
 **Grid Search** (`GridSearchCV`, 5-fold CV, `n_jobs=-1`):
 
@@ -145,7 +145,7 @@ The best `RandomForestRegressor` configuration is selected automatically, then i
 
 ---
 
-### Step 7 — Final Evaluation on the Held-Out Test Set (`lines 333–402`)
+### Step 7 — Final Evaluation on the Held-Out Test Set
 
 The tuned model is applied to the **unseen test set** (never touched during training/tuning):
 
@@ -170,13 +170,13 @@ The left panel (Residuals vs Predicted) shows a slight heteroscedasticity at hig
 
 ---
 
-### Step 8 — Model Comparison Summary (`lines 404–411`)
+### Step 8 — Model Comparison Summary
 
 A sorted table of cross-validation RMSE is printed to the console, making it easy to compare all four models side-by-side.
 
 ---
 
-### Step 9 — Saving the Model & Pipeline (`lines 413–424`)
+### Step 9 — Saving the Model & Pipeline
 
 ```python
 joblib.dump(final_model, 'final_housing_model.pkl')   # ~228 MB
@@ -187,7 +187,7 @@ Both artefacts are saved to the project root using **`joblib`** for efficient bi
 
 ---
 
-### Step 10 — Example Prediction (`lines 426–445`)
+### Step 10 — Example Prediction
 
 Five samples are drawn from the test set and run through the saved pipeline to demonstrate end-to-end inference:
 
@@ -213,7 +213,6 @@ pip install pandas numpy matplotlib seaborn scikit-learn scipy joblib
 ### Run the full pipeline
 
 ```bash
-cd "Housing Price Prediction"
 python housingprice.py
 ```
 
