@@ -193,91 +193,69 @@ print("\n" + "="*60)
 print("TRAINING AND EVALUATING MODELS")
 print("="*60)
 
-def display_scores(scores, model_name):
-    """Display cross-validation scores"""
-    print(f"\n{model_name} Scores:")
-    print(f"Scores: {scores}")
-    print(f"Mean: {scores.mean():.4f}")
-    print(f"Standard deviation: {scores.std():.4f}")
-
 # Dictionary to store model performances
 model_performances = {}
 
-# 5.1 Linear Regression
-print("\n" + "-"*40)
-print("Training Linear Regression...")
-lin_reg = LinearRegression()
-lin_reg.fit(housing_prepared, housing_labels)
+def train_and_evaluate(model, X, y, model_name, cv=10):
+    """
+    Fit a regression model, report train-set RMSE, run k-fold
+    cross-validation, and store the mean CV RMSE for comparison.
 
-# Predictions on training set
-housing_predictions = lin_reg.predict(housing_prepared)
-lin_mse = mean_squared_error(housing_labels, housing_predictions)
-lin_rmse = np.sqrt(lin_mse)
-print(f"Linear Regression RMSE on training set: ${lin_rmse:,.2f}")
+    Parameters
+    ----------
+    model       : sklearn estimator
+    X           : prepared feature matrix (numpy array)
+    y           : target Series / array
+    model_name  : str — label used in print output and results dict
+    cv          : int — number of CV folds (default 10)
 
-# Cross-validation
-lin_scores = -cross_val_score(lin_reg, housing_prepared, housing_labels,
-                               scoring="neg_mean_squared_error", cv=10)
-lin_rmse_scores = np.sqrt(lin_scores)
-display_scores(lin_rmse_scores, "Linear Regression CV")
-model_performances['Linear Regression'] = lin_rmse_scores.mean()
+    Returns
+    -------
+    fitted model
+    """
+    # --- Fit ---
+    model.fit(X, y)
 
-# 5.2 Decision Tree
-print("\n" + "-"*40)
-print("Training Decision Tree...")
-tree_reg = DecisionTreeRegressor(random_state=42)
-tree_reg.fit(housing_prepared, housing_labels)
+    # --- Training-set RMSE ---
+    train_preds = model.predict(X)
+    train_rmse  = np.sqrt(mean_squared_error(y, train_preds))
+    print(f"\n{model_name} RMSE on training set: ${train_rmse:,.2f}")
 
-# Predictions on training set
-housing_predictions = tree_reg.predict(housing_prepared)
-tree_mse = mean_squared_error(housing_labels, housing_predictions)
-tree_rmse = np.sqrt(tree_mse)
-print(f"Decision Tree RMSE on training set: ${tree_rmse:,.2f}")
+    # --- Cross-validation ---
+    cv_scores      = -cross_val_score(model, X, y,
+                                      scoring="neg_mean_squared_error", cv=cv)
+    cv_rmse_scores = np.sqrt(cv_scores)
+    print(f"{model_name} CV Scores:")
+    print(f"  Scores : {cv_rmse_scores}")
+    print(f"  Mean   : {cv_rmse_scores.mean():.4f}")
+    print(f"  Std Dev: {cv_rmse_scores.std():.4f}")
 
-# Cross-validation
-tree_scores = -cross_val_score(tree_reg, housing_prepared, housing_labels,
-                                scoring="neg_mean_squared_error", cv=10)
-tree_rmse_scores = np.sqrt(tree_scores)
-display_scores(tree_rmse_scores, "Decision Tree CV")
-model_performances['Decision Tree'] = tree_rmse_scores.mean()
+    # --- Store for later comparison ---
+    model_performances[model_name] = cv_rmse_scores.mean()
 
-# 5.3 Random Forest
-print("\n" + "-"*40)
-print("Training Random Forest...")
-forest_reg = RandomForestRegressor(n_estimators=100, random_state=42)
-forest_reg.fit(housing_prepared, housing_labels)
+    return model
 
-# Predictions on training set
-housing_predictions = forest_reg.predict(housing_prepared)
-forest_mse = mean_squared_error(housing_labels, housing_predictions)
-forest_rmse = np.sqrt(forest_mse)
-print(f"Random Forest RMSE on training set: ${forest_rmse:,.2f}")
+# Define all candidate models
+candidates = [
+    ("Linear Regression",  LinearRegression()),
+    ("Decision Tree",       DecisionTreeRegressor(random_state=42)),
+    ("Random Forest",       RandomForestRegressor(n_estimators=100, random_state=42)),
+    ("Gradient Boosting",   GradientBoostingRegressor(n_estimators=100,
+                                                       learning_rate=0.1,
+                                                       random_state=42)),
+]
 
-# Cross-validation
-forest_scores = -cross_val_score(forest_reg, housing_prepared, housing_labels,
-                                  scoring="neg_mean_squared_error", cv=10)
-forest_rmse_scores = np.sqrt(forest_scores)
-display_scores(forest_rmse_scores, "Random Forest CV")
-model_performances['Random Forest'] = forest_rmse_scores.mean()
+# Train and evaluate every model with a single unified call
+trained_models = {}
+for name, model in candidates:
+    print("\n" + "-"*40)
+    print(f"Training {name}...")
+    trained_models[name] = train_and_evaluate(
+        model, housing_prepared, housing_labels, name
+    )
 
-# 5.4 Gradient Boosting
-print("\n" + "-"*40)
-print("Training Gradient Boosting...")
-gbr_reg = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
-gbr_reg.fit(housing_prepared, housing_labels)
-
-# Predictions on training set
-housing_predictions = gbr_reg.predict(housing_prepared)
-gbr_mse = mean_squared_error(housing_labels, housing_predictions)
-gbr_rmse = np.sqrt(gbr_mse)
-print(f"Gradient Boosting RMSE on training set: ${gbr_rmse:,.2f}")
-
-# Cross-validation
-gbr_scores = -cross_val_score(gbr_reg, housing_prepared, housing_labels,
-                               scoring="neg_mean_squared_error", cv=10)
-gbr_rmse_scores = np.sqrt(gbr_scores)
-display_scores(gbr_rmse_scores, "Gradient Boosting CV")
-model_performances['Gradient Boosting'] = gbr_rmse_scores.mean()
+# Convenience references used later in fine-tuning
+forest_reg = trained_models["Random Forest"]
 
 # 6. FINE-TUNE THE BEST MODEL
 print("\n" + "="*60)
